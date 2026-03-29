@@ -1,0 +1,174 @@
+<!DOCTYPE html>
+<html lang="th">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>ระบบรายงาน PM2.5 (พร้อมระบบแจ้งเตือนสี)</title>
+    <link href="https://fonts.googleapis.com/css2?family=Kanit:wght@300;400;500&display=swap" rel="stylesheet">
+    <script src="https://www.gstatic.com/firebasejs/10.8.0/firebase-app-compat.js"></script>
+    <script src="https://www.gstatic.com/firebasejs/10.8.0/firebase-firestore-compat.js"></script>
+
+    <style>
+        body { font-family: 'Kanit', sans-serif; background: #fff; margin: 0; padding: 20px; color: #333; }
+        h2 { text-align: center; font-weight: 500; margin-bottom: 30px; }
+        .form-container { max-width: 500px; margin: 0 auto; }
+        .input-row { display: flex; align-items: center; padding: 18px 0; border-bottom: 1px solid #f0f0f0; gap: 15px; }
+        .label-cell { flex: 2; font-size: 1rem; color: #444; }
+        .input-cell { flex: 2; }
+        .unit-cell { flex: 1; text-align: right; font-weight: 300; color: #999; font-size: 0.9rem; }
+        input[type="number"] { width: 100%; font-family: 'Kanit', sans-serif; font-size: 1.2rem; padding: 12px; border: 1px solid #ddd; border-radius: 8px; outline: none; background: #fafafa; box-sizing: border-box; }
+        input:focus { border-color: #007bff; background: #fff; }
+        .btn-submit { display: block; width: 100%; max-width: 400px; margin: 40px auto; padding: 18px; background: #222; color: white; border: none; border-radius: 12px; font-family: 'Kanit', sans-serif; font-size: 1.2rem; font-weight: 500; cursor: pointer; }
+        .btn-submit:disabled { background: #ccc; cursor: not-allowed; }
+        #status-msg { text-align: center; font-size: 0.9rem; color: #888; margin-top: -20px; margin-bottom: 10px; min-height: 1.2em; }
+    </style>
+</head>
+<body>
+
+    <h2>บันทึกระดับน้ำ (8 จุดตรวจ)</h2>
+    <div class="form-container" id="form-container"></div>
+    <button class="btn-submit" onclick="submitData()" id="saveBtn">บันทึกข้อมูลและตรวจสอบเกณฑ์</button>
+    <p id="status-msg"></p>
+
+    <script>
+        // ---- HELPER: แสดงสถานะ ----
+        function setStatus(msg, color) {
+            const el = document.getElementById('status-msg');
+            el.style.color = color || '#888';
+            el.innerText = msg;
+        }
+
+        // ---- 1. Firebase Config ----
+        const firebaseConfig = {
+            apiKey: "AIzaSyDFGlYDg8n7jJMOehSriF4o1rZM1aHR2uY",
+            authDomain: "city-prototype.firebaseapp.com",
+            projectId: "city-prototype",
+            storageBucket: "city-prototype.firebasestorage.app",
+            messagingSenderId: "587922189632",
+            appId: "1:587922189632:web:e13e821623b81209465ea5",
+            measurementId: "G-QYNEVNZHD4"
+        };
+
+        let db;
+        try {
+            // ป้องกัน initialize ซ้ำกรณี reload
+            if (!firebase.apps.length) {
+                firebase.initializeApp(firebaseConfig);
+            }
+            db = firebase.firestore();
+            console.log("✅ Firebase initialized");
+            setStatus("Firebase พร้อมใช้งาน", "green");
+        } catch (e) {
+            console.error("❌ Firebase init error:", e);
+            setStatus("❌ Firebase เริ่มต้นไม่ได้: " + e.message, "red");
+        }
+
+        // ---- 2. Config 8 จุด ----
+        const config = [
+            { id: 1, name: "จุดที่ 1 ถนนบอนด์สตรีท ปากทางติวานนท์",      unit: "µg/m3", offset: 0, divisor: 1, mode: "add", blue_tier: 0, green_tier:15.1, yellow_tier: 25.1, orange_tier: 37.6, red_tier: 75.0, lat: 13.930053, lng: 100.530795 },
+            { id: 2, name: "จุดที่ 2 ถนนบอนด์สตรีท โซน D",               unit: "µg/m3", offset: 0, divisor: 1, mode: "add", blue_tier: 0, green_tier:15.1, yellow_tier: 25.1, orange_tier: 37.6, red_tier: 75.0, lat: 13.927485, lng: 100.534890 },
+            { id: 3, name: "จุดที่ 3 ถนนบอนด์สตรีท ซอย 8",                 unit: "µg/m3", offset: 0, divisor: 1, mode: "add", blue_tier: 0, green_tier:15.1, yellow_tier: 25.1, orange_tier: 37.6, red_tier: 75.0, lat: 13.919328, lng: 100.537818 },
+            { id: 4, name: "จุดที่ 4 มหาวิทยาลัยสุโขทัยธรรมาธิราช",               unit: "µg/m3", offset: 0, divisor: 1, mode: "add", blue_tier: 0, green_tier:15.1, yellow_tier: 25.1, orange_tier: 37.6, red_tier: 75.0, lat: 13.910075, lng: 100.536752 },
+            { id: 5, name: "จุดที่ 5 ถนนแจ้งวัฒนะปากเกร็ด 39 (P1)",    unit: "µg/m3", offset: 0, divisor: 1, mode: "add", blue_tier: 0, green_tier:15.1, yellow_tier: 25.1, orange_tier: 37.6, red_tier: 75.0, lat: 13.929822, lng: 100.540282 },
+            { id: 6, name: "จุดที่ 6 สวนสมเด็จพระศรีนครินทร์",     unit: "µg/m3", offset: 0, divisor: 1, mode: "add", blue_tier: 0, green_tier:15.1, yellow_tier: 25.1, orange_tier: 37.6, red_tier: 75.0, lat: 13.930594, lng: 100.553366 },
+            { id: 7, name: "จุดที่ 7 โรงเรียนวัดผาสุกมณีจักร",     unit: "µg/m3", offset: 0, divisor: 1, mode: "add", blue_tier: 0, green_tier:15.1, yellow_tier: 25.1, orange_tier: 37.6, red_tier: 75.0, lat: 13.911956, lng: 100.543450 },
+            { id: 8, name: "จุดที่ 8 แยกไฟแดง IF ( Impact Forum)",     unit: "µg/m3", offset: 0, divisor: 1, mode: "add", blue_tier: 0, green_tier:15.1, yellow_tier: 25.1, orange_tier: 37.6, red_tier: 75.0, lat: 13.917155, lng: 100.545452 },
+            { id: 9, name: "จุดที่ 9 ศูนย์แสดงสินค้าอิมแพ็ค",     unit: "µg/m3", offset: 0, divisor: 1, mode: "add", blue_tier: 0, green_tier:15.1, yellow_tier: 25.1, orange_tier: 37.6, red_tier: 75.0, lat: 13.913462, lng: 100.548134 },
+            { id: 10, name: "จุดที่ 10 อาคาร Bangkok Land",     unit: "µg/m3", offset: 0, divisor: 1, mode: "add", blue_tier: 0, green_tier:15.1, yellow_tier: 25.1, orange_tier: 37.6, red_tier: 75.0, lat: 13.911225, lng: 100.549660 },
+            { id: 11, name: "จุดที่ 11 Popular Condo", unit: "µg/m3", offset: 0, divisor: 1, mode: "add", blue_tier: 0, green_tier:15.1, yellow_tier: 25.1, orange_tier: 37.6, red_tier: 75.0, lat: 13.909732, lng: 100.554003 } }
+        ];
+
+        // ---- 3. สร้าง UI ----
+        const container = document.getElementById('form-container');
+        config.forEach(p => {
+            container.innerHTML += `
+                <div class="input-row">
+                    <div class="label-cell">${p.name}</div>
+                    <div class="input-cell"><input type="number" id="raw_${p.id}" inputmode="decimal" placeholder="0.00" step="0.01"></div>
+                    <div class="unit-cell">${p.unit}</div>
+                </div>`;
+        });
+
+        // ---- 4. Submit พร้อม timeout guard ----
+        async function submitData() {
+            if (!db) {
+                alert("❌ Firebase ยังไม่พร้อม กรุณารีเฟรชหน้าใหม่ครับ");
+                return;
+            }
+
+            const btn = document.getElementById('saveBtn');
+            btn.disabled = true;
+            btn.innerText = "กำลังบันทึก...";
+            setStatus("⏳ กำลังเชื่อมต่อ Firebase...", "#888");
+
+            // Timeout 15 วินาที ป้องกันค้าง
+            const timeoutPromise = new Promise((_, reject) =>
+                setTimeout(() => reject(new Error("Timeout: ไม่ได้รับการตอบกลับจาก Firebase ใน 15 วินาที")), 15000)
+            );
+
+            try {
+                await Promise.race([doCommit(), timeoutPromise]);
+                setStatus("✅ บันทึกเรียบร้อยแล้ว!", "green");
+                alert("บันทึกข้อมูลและวิเคราะห์ระดับการแจ้งเตือนเรียบร้อยแล้วครับ!");
+                config.forEach(p => { document.getElementById(`raw_${p.id}`).value = ""; });
+            } catch (error) {
+                console.error("❌ Error:", error);
+                setStatus("❌ เกิดข้อผิดพลาด: " + error.message, "red");
+                alert("เกิดข้อผิดพลาด:\n" + error.message + "\n\nกรุณาเปิด Console (F12) เพื่อดูรายละเอียด");
+            } finally {
+                btn.disabled = false;
+                btn.innerText = "บันทึกข้อมูลและตรวจสอบเกณฑ์";
+            }
+        }
+
+        async function doCommit() {
+            console.log("📤 เริ่มสร้าง batch...");
+            const batch = db.batch();
+
+            config.forEach(p => {
+                const rawVal = document.getElementById(`raw_${p.id}`).value;
+                const numRaw = parseFloat(rawVal) || 0;
+
+                let finalVal = 0;
+                if (p.mode === "sub") {
+                    finalVal = (p.offset - numRaw) / p.divisor;
+                } else {
+                    finalVal = (numRaw + p.offset) / p.divisor;
+                }
+                finalVal = Math.round(finalVal * 10000) / 10000; // ปัดทศนิยม 4 ตำแหน่ง
+
+                let alertColor = "Green";
+                let alertLevel = 0;
+                if (finalVal >= p.red_tier) {
+                    alertColor = "Red";
+                    alertLevel = 2;
+                } else if (finalVal >= p.yellow_tier) {
+                    alertColor = "Yellow";
+                    alertLevel = 1;
+                }
+
+                console.log(`  จุด ${p.id}: raw=${numRaw}, final=${finalVal}, alert=${alertColor}`);
+
+                const docRef = db.collection("water_monitoring").doc();
+                batch.set(docRef, {
+                    point_id: p.id,
+                    point_name: p.name,
+                    raw_value: numRaw,
+                    final_value: finalVal,
+                    unit: p.unit,
+                    alert_color: alertColor,
+                    alert_level: alertLevel,
+                    latitude: p.lat,
+                    longitude: p.lng,
+                    timestamp: firebase.firestore.FieldValue.serverTimestamp(),
+                    source: "manual_input_mobile"
+                });
+            });
+
+            console.log("📤 กำลัง commit batch...");
+            await batch.commit();
+            console.log("✅ Commit สำเร็จ!");
+        }
+    </script>
+</body>
+</html>
