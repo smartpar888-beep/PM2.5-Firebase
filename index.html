@@ -149,7 +149,7 @@
 
                 console.log(`  จุด ${p.id}: raw=${numRaw}, final=${finalVal}, alert=${alertColor}`);
 
-                const docRef = db.collection("water_monitoring").doc();
+                const docRef = db.collection("air_monitoring").doc();
                 batch.set(docRef, {
                     point_id: p.id,
                     point_name: p.name,
